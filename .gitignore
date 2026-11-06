@@ -1,0 +1,20 @@
+# secrets and local config
+.env
+.env.*
+*.pem
+*.key
+n8ninfo.txt
+
+# generated / temporary
+node_modules/
+build/
+*.log
+*.tmp
+*.old
+*.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.claude/

@@ -1,0 +1,700 @@
+{
+  "name": "BookLeaf - Royalty Summary (Assignment 2)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bookleaf-royalty-summary",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f6ed8f3b-1177-4c3d-a23e-3040e6cc416f",
+      "name": "01 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -320,
+        368
+      ],
+      "webhookId": "390db91b-0f24-4a82-bf8b-56df231b2e73",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"02 Validate Input\"\n// Checks the shape of the payload sent by Bubble and normalises numbers. It never trusts the sender:\n// anything missing/invalid becomes a validation failure that is returned to Bubble as status \"Failed\".\nconst item = $input.first().json;\nconst b = (item && item.body) || {};\nconst errors = [];\n\nconst isStr = (v) => typeof v === 'string' && v.trim().length > 0;\n// tolerant of how Bubble prints numbers inside text (e.g. \"3,570\" or \"₹3570\"), strict about everything else\nconst toNum = (v) => {\n  if (v === null || v === undefined) return NaN;\n  const s = String(v).replace(/[,\\s₹]/g, '');\n  return s === '' ? NaN : Number(s);\n};\nconst optStr = (v) => (v === null || v === undefined ? '' : String(v));\n\n// Bubble's API Connector substitutes a saved sample value when a field is empty. The sample values are the\n// marker \"__MISSING__\", so an empty field can never turn into believable data - it fails here instead.\nif (JSON.stringify(b).indexOf('__MISSING__') >= 0) errors.push('a required field was empty in the request from Bubble');\nif (!isStr(b.request_id)) errors.push('request_id is missing');\nif (!b.author || !isStr(b.author.author_id) || !isStr(b.author.name)) errors.push('author.author_id and author.name are required');\nif (!/^\\d{4}-\\d{2}-\\d{2}/.test(String(b.reference_date || ''))) errors.push('reference_date must be YYYY-MM-DD');\n\nlet books = b.books;\nif (typeof books === 'string') {\n  try { books = JSON.parse(books); } catch (e) { errors.push('books is not valid JSON'); books = null; }\n}\nif (!Array.isArray(books) || books.length < 1) errors.push('books must be a non-empty array');\n\nconst STATUSES = ['Paid up', 'In cycle', 'Overdue', 'Not applicable'];\nconst clean = [];\n(Array.isArray(books) ? books : []).forEach((bk, i) => {\n  const tag = 'books[' + i + ']';\n  if (!bk || !isStr(bk.book_id) || !isStr(bk.title)) { errors.push(tag + ' needs book_id and title'); return; }\n  if (!isStr(bk.status)) errors.push(tag + '.status is missing');\n  const nums = {};\n  ['copies_sold', 'total_earned', 'paid', 'pending'].forEach((k) => {\n    const n = toNum(bk[k]);\n    if (Number.isNaN(n) || n < 0) errors.push(tag + '.' + k + ' must be a number >= 0');\n    nums[k] = n;\n  });\n  if (!STATUSES.includes(bk.royalty_status)) errors.push(tag + '.royalty_status must be one of ' + STATUSES.join('/'));\n  clean.push({\n    book_id: String(bk.book_id), title: String(bk.title), status: optStr(bk.status),\n    publication_date: optStr(bk.publication_date).slice(0, 10), last_payout_date: optStr(bk.last_payout_date).slice(0, 10),\n    mrp: bk.mrp === null || bk.mrp === undefined || bk.mrp === '' ? null : toNum(bk.mrp),\n    royalty_per_copy: bk.royalty_per_copy === null || bk.royalty_per_copy === undefined || bk.royalty_per_copy === '' ? null : toNum(bk.royalty_per_copy),\n    copies_sold: nums.copies_sold, total_earned: nums.total_earned, paid: nums.paid, pending: nums.pending,\n    royalty_status: bk.royalty_status,\n  });\n});\n\nconst t = b.totals || {};\nconst totals = { earned: toNum(t.earned), paid: toNum(t.paid), pending: toNum(t.pending) };\n['earned', 'paid', 'pending'].forEach((k) => { if (Number.isNaN(totals[k])) errors.push('totals.' + k + ' must be a number'); });\n\nreturn [{\n  json: {\n    ok: errors.length === 0,\n    errors,\n    fail_stage: 'validation',\n    fail_message: errors.join('; '),\n    payload: {\n      request_id: optStr(b.request_id),\n      trigger_type: optStr(b.trigger_type),\n      batch_id: optStr(b.batch_id) === 'null' ? '' : optStr(b.batch_id),\n      requested_by: optStr(b.requested_by),\n      requested_at: optStr(b.requested_at),\n      reference_date: optStr(b.reference_date).slice(0, 10),\n      demo_mode: b.demo_mode === true || b.demo_mode === 'true',\n      author: {\n        author_id: b.author ? optStr(b.author.author_id) : '', name: b.author ? optStr(b.author.name) : '',\n        email: b.author ? optStr(b.author.email) : '', city: b.author ? optStr(b.author.city) : '',\n      },\n      books: clean,\n      totals,\n    },\n  },\n}];\n"
+      },
+      "id": "c1fc7b4c-eec1-42a3-af0d-d3a717b7a51a",
+      "name": "02 Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": "",
+              "id": "2acdb28b-06eb-447c-8a1d-fdd4740e098c"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "47ff52ab-8f1d-458d-ac95-899185b4486a",
+      "name": "03 Input valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        128,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"04 Acquire author lock\"\n// BEST-EFFORT de-duplication only. Workflow static data is not atomic, is not safely shared between\n// parallel executions, persists only for production runs and is lost on restart. The enforced guard is\n// Bubble's claim-then-arbitrate step; this is a second, courtesy layer\nconst d = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nsd.locks = sd.locks || {};\nconst now = Date.now();\nconst TTL_MS = 5 * 60 * 1000;\n\nObject.keys(sd.locks).forEach((k) => { if (now - sd.locks[k].ts > TTL_MS) delete sd.locks[k]; });\n\nconst key = d.payload.author.author_id;\nconst existing = sd.locks[key];\nlet duplicate = false;\nif (existing && existing.request_id !== d.payload.request_id) {\n  duplicate = true;\n} else {\n  sd.locks[key] = { request_id: d.payload.request_id, ts: now };\n}\n\nreturn [{\n  json: Object.assign({}, d, {\n    duplicate,\n    fail_stage: duplicate ? 'duplicate' : d.fail_stage,\n    fail_message: duplicate ? 'Another summary for this author is already being generated (n8n lock held by request ' + existing.request_id + ')' : '',\n  }),\n}];\n"
+      },
+      "id": "1e7ea4eb-4f08-45ab-897b-18f384c9678f",
+      "name": "04 Acquire author lock (best-effort)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.duplicate }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              },
+              "rightValue": "",
+              "id": "53cb007b-96a6-45ac-97c2-b60c006b06a4"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0c78beaf-1675-4e15-b609-24718fe58ce0",
+      "name": "05 Not a duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"06 Integrity & facts\"\n// 1) Re-checks the arithmetic Bubble sent.  2) Computes EVERY number/date the email may contain, in code.\n// 3) Chooses the payout-timing mode and builds the OpenAI request.  The model only writes wording.\nconst d = $input.first().json;\nconst p = d.payload;\n\n// ---- constants (policy values come from the original Assignment 1 Knowledge Base; see IMPLEMENTATION_PLAN.md 10.8)\nconst MODEL = 'gpt-4o-mini';\nconst WINDOW_DAYS = 45;            // \"paid within 45 days of the quarter ending\"\nconst MIN_PAYOUT = 1000;           // \"Minimum payout threshold: Rs 1,000 ... roll over to the next quarter\"\nconst ESCALATION_COMMITMENT_ENABLED = false; // the KB's \"within 48 hours\" wording is only for real escalations\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];\n\n// ---- formatting helpers (Indian digit grouping, no Intl dependency)\nfunction grp(n) {\n  const s = String(Math.round(Math.abs(n)));\n  let last3 = s.slice(-3);\n  let rest = s.slice(0, -3);\n  if (rest) last3 = ',' + last3;\n  rest = rest.replace(/\\B(?=(\\d{2})+(?!\\d))/g, ',');\n  return (n < 0 ? '-' : '') + rest + last3;\n}\nconst inr = (n) => '₹' + grp(n);\nfunction ymd(s) { const m = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(s || ''); return m ? { y: +m[1], m: +m[2], d: +m[3] } : null; }\nfunction fmtIso(s) { const q = ymd(s); return q ? q.d + ' ' + MONTHS[q.m - 1] + ' ' + q.y : null; }\nfunction fmtObj(dt) { return dt.getUTCDate() + ' ' + MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear(); }\n\n// ---- 1. integrity: do not trust the sender\nconst problems = [];\nlet sumE = 0, sumP = 0, sumN = 0;\np.books.forEach((b) => {\n  const published = b.status.indexOf('Published') === 0;\n  sumE += b.total_earned; sumP += b.paid; sumN += b.pending;\n  if (b.paid + b.pending !== b.total_earned) problems.push(b.book_id + ': paid + pending != total earned');\n  if (b.mrp !== null && b.royalty_per_copy !== null && b.copies_sold * b.royalty_per_copy !== b.total_earned) problems.push(b.book_id + ': copies x royalty per copy != total earned');\n  if (!published && (b.pending !== 0 || b.total_earned !== 0)) problems.push(b.book_id + ': unpublished book carries royalty figures');\n  if (published && b.pending === 0 && b.royalty_status !== 'Paid up') problems.push(b.book_id + ': status inconsistent with zero pending');\n  if (published && b.pending > 0 && b.royalty_status !== 'In cycle' && b.royalty_status !== 'Overdue') problems.push(b.book_id + ': status inconsistent with pending amount');\n  if (!published && b.royalty_status !== 'Not applicable') problems.push(b.book_id + ': unpublished book must be Not applicable');\n});\nif (sumE !== p.totals.earned || sumP !== p.totals.paid || sumN !== p.totals.pending) problems.push('book totals (' + sumE + '/' + sumP + '/' + sumN + ') differ from the totals Bubble sent');\nif (problems.length) {\n  return [{ json: { ok: false, fail_stage: 'data', fail_message: 'Data integrity check failed: ' + problems.join('; '), payload: p } }];\n}\n\n// ---- 2. deterministic facts\nconst ref = ymd(p.reference_date);\nconst refUtc = Date.UTC(ref.y, ref.m - 1, ref.d);\nconst qEnds = [];\n[ref.y - 1, ref.y, ref.y + 1].forEach((y) => { [[2, 31], [5, 30], [8, 30], [11, 31]].forEach((q) => qEnds.push(Date.UTC(y, q[0], q[1]))); });\nlet last = null, next = null;\nqEnds.forEach((t) => { if (t < refUtc) last = t; if (next === null && t >= refUtc) next = t; });\nconst DAY = 86400000;\nconst lastDeadline = last + WINDOW_DAYS * DAY;\nconst dueBy = refUtc <= lastDeadline ? lastDeadline : next + WINDOW_DAYS * DAY;\nconst dueByText = fmtObj(new Date(dueBy));\n\nconst published = p.books.filter((b) => b.status.indexOf('Published') === 0);\nconst production = p.books.filter((b) => b.status.indexOf('Published') !== 0);\nconst overdueBooks = published.filter((b) => b.royalty_status === 'Overdue');\nconst inCycleBooks = published.filter((b) => b.royalty_status === 'In cycle');\nconst pendingTotal = p.totals.pending;\n\nlet mode = 'ALL_PAID';\nif (published.length === 0) mode = 'NO_ROYALTIES_YET';\nelse if (overdueBooks.length > 0) mode = 'OVERDUE';\nelse if (inCycleBooks.length > 0) mode = 'IN_CYCLE';\n\nconst flags = [];\nif (published.some((b) => b.pending > 0 && b.paid === 0 && b.copies_sold > 0)) flags.push('NEVER_PAID');\nif (pendingTotal > 0 && pendingTotal < MIN_PAYOUT) flags.push('BELOW_THRESHOLD');\n// KB rule wins over the app's 90-day colour rule: an amount under the minimum payout is not \"late\", it rolls over.\nif (flags.indexOf('BELOW_THRESHOLD') >= 0) mode = 'BELOW_THRESHOLD';\nif (production.length > 0) flags.push('HAS_PRODUCTION');\n\nconst dateAllowed = mode === 'IN_CYCLE' || (mode === 'OVERDUE' && inCycleBooks.length > 0);\nconst facts = {\n  author_first_name: p.author.name.split(' ')[0],\n  author_full_name: p.author.name,\n  generated_on: fmtIso(p.reference_date),\n  payout_mode: mode,\n  scenario_flags: flags,\n  published_books: published.map((b) => ({\n    title: b.title,\n    copies_sold: grp(b.copies_sold),\n    total_earned: inr(b.total_earned),\n    paid: inr(b.paid),\n    pending: inr(b.pending),\n    last_payout: b.last_payout_date ? fmtIso(b.last_payout_date) : 'no payout recorded yet',\n    royalty_status: (mode === 'BELOW_THRESHOLD' && b.pending > 0) ? 'Below minimum payout (rolls over)' : b.royalty_status,\n  })),\n  production_books: production.map((b) => ({ title: b.title, stage: b.status.replace(/^In Production\\s*-\\s*/i, '') })),\n  totals: { earned: inr(p.totals.earned), paid: inr(p.totals.paid), pending: inr(p.totals.pending) },\n  payout_policy: {\n    cycle: 'Royalties are calculated quarterly and paid within ' + WINDOW_DAYS + ' days of the quarter ending',\n    minimum_payout: inr(MIN_PAYOUT),\n    below_minimum_rule: 'If accumulated royalties are below the minimum payout, they roll over to the next quarter',\n    date_statement_allowed: dateAllowed,\n    standard_due_by: dateAllowed ? dueByText : null,\n    titles_with_standard_due_date: dateAllowed ? inCycleBooks.map((b) => b.title) : [],\n    below_threshold: flags.indexOf('BELOW_THRESHOLD') >= 0,\n  },\n  overdue_titles: overdueBooks.map((b) => b.title),\n};\n\n// numbers/dates the email may legitimately contain = those present in the facts + the two policy numbers\nconst factsText = JSON.stringify(facts);\nconst allowedNumbers = Array.from(new Set((factsText.match(/\\d[\\d,]*/g) || []).map((s) => s.replace(/,/g, '')).concat([String(WINDOW_DAYS), String(MIN_PAYOUT)])));\nconst allowedDates = [];\nif (facts.generated_on) allowedDates.push(facts.generated_on);\nfacts.published_books.forEach((b) => { if (b.last_payout.match(/\\d{4}$/)) allowedDates.push(b.last_payout); });\nif (dateAllowed) allowedDates.push(dueByText);\n\n// ---- 3. prompt\nconst KB = [\n  'ROYALTY POLICY (BookLeaf Knowledge Base)',\n  '- 80/20 split: 80% of the net profit per book goes to the author, 20% to BookLeaf.',\n  '- Royalties are calculated quarterly and paid within 45 days of the quarter ending.',\n  '- Minimum payout threshold: ₹1,000. If accumulated royalties are below this, they roll over to the next quarter.',\n  '- Payouts are made via bank transfer to the account linked in the author\\'s dashboard.',\n  '',\n  'TONE GUIDELINES (how BookLeaf talks to authors)',\n  '- Always empathetic and professional. Authors are our partners, not customers to be managed.',\n  '- Acknowledge the author\\'s concern before jumping to solutions.',\n  '- Be specific: include actual numbers, dates and statuses wherever possible rather than vague reassurances.',\n  '- If something is BookLeaf\\'s fault (delayed royalties), own it directly. No corporate deflection.',\n  '- Always end with a clear next step for the author and/or the BookLeaf team.',\n].join('\\n');\n\nconst scenario = [];\nif (mode === 'ALL_PAID') scenario.push('All royalties are paid up. Thank the author warmly and acknowledge their success. Do NOT mention outstanding amounts, next payouts or payout dates.');\nif (mode === 'NO_ROYALTIES_YET') scenario.push('There are no published books yet, so no royalties exist. Give a brief, warm status update on the book(s) in production only.');\nif (mode === 'IN_CYCLE') scenario.push('There are pending royalties and none are overdue. State the pending amounts, explain the quarterly cycle and the 45-day window, and say that under BookLeaf\\'s standard cycle the pending royalties fall due by ' + dueByText + '. Phrase this as the standard cycle, not a guarantee.');\nif (mode === 'OVERDUE') {\n  scenario.push('Some royalties are beyond the usual payout cycle (' + overdueBooks.map((b) => b.title).join('; ') + '). Acknowledge this directly and own it on behalf of BookLeaf. Name those titles with their last payout (or that no payout is recorded yet). Restate the policy (quarterly calculation, payment within 45 days of quarter end). You MUST NOT give any future payout date, estimate, or timing words such as soon, shortly or within the next. Do not promise a response time. Next step: invite the author to ask for a line-by-line royalty breakdown.');\n  if (dateAllowed) scenario.push('Only for these titles may you say the standard cycle puts payment due by ' + dueByText + ': ' + inCycleBooks.map((b) => b.title).join('; ') + '. Never attach that date to an overdue title.');\n}\nif (flags.indexOf('NEVER_PAID') >= 0) scenario.push('For books where \"last_payout\" says no payout recorded yet, say plainly that no payout has been recorded yet. Explain using only the policy; never invent a cause.');\nif (mode === 'BELOW_THRESHOLD') scenario.push('The total pending amount is below the minimum payout, so under policy it rolls over to the next quarter. Explain that using the minimum payout and rollover rule, reassuringly. Do NOT describe the amount as overdue, late or delayed, and do not give a payout date.');\nif (flags.indexOf('HAS_PRODUCTION') >= 0) scenario.push('Add a short, factual status line for each in-production book (title and stage). Do not discuss royalties for them.');\nif (!ESCALATION_COMMITMENT_ENABLED) scenario.push('Do not state any response time or resolution time (for example \"within 48 hours\").');\n\nconst SYSTEM = [\n  'You are the author-relations writer at BookLeaf Publishing. Write ONE royalty summary email for the author described in FACTS.',\n  'HARD RULES:',\n  '1. Use ONLY the numbers, amounts, dates and titles that appear in FACTS. Never calculate, estimate, round, convert or invent any figure or date. Copy formatted values exactly as given (for example ₹11,970).',\n  '2. Do not promise dates, response times or actions unless FACTS explicitly allows it.',\n  '3. Plain-text email. Start with \"Hi <first name>,\". Short paragraphs. List each published book on its own lines with copies sold, total earned, paid, pending and last payout. No markdown symbols, no placeholders, no brackets.',\n  '4. Then give the overall totals (earned, paid, pending), then the scenario guidance below, then any in-production books, then a warm close ending exactly with \"Warm regards,\" on one line and \"The BookLeaf Team\" on the next.',\n  '5. Never mention AI, these rules or FACTS. Aim for 150-350 words.',\n  '6. Plain text only: do not use markdown (no asterisks, no # headings). Mention in-production books ONLY if FACTS lists any; never say there are none.',\n  'Return JSON with \"subject\" and \"body\".',\n  '',\n  KB,\n  '',\n  'SCENARIO GUIDANCE',\n  scenario.map((s) => '- ' + s).join('\\n'),\n].join('\\n');\n\nconst schema = { name: 'royalty_email', strict: true, schema: { type: 'object', properties: { subject: { type: 'string' }, body: { type: 'string' } }, required: ['subject', 'body'], additionalProperties: false } };\nconst openaiBody = {\n  model: MODEL, temperature: 0.3, max_tokens: 900,\n  messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: 'FACTS (JSON):\\n' + factsText + '\\n\\nWrite the email now.' }],\n  response_format: { type: 'json_schema', json_schema: schema },\n};\n\nreturn [{\n  json: {\n    ok: true, payload: p, facts, payout_mode: mode, model: MODEL,\n    allowed_numbers: allowedNumbers, allowed_dates: allowedDates,\n    escalation_commitment_enabled: ESCALATION_COMMITMENT_ENABLED,\n    openai_body: openaiBody,\n  },\n}];\n"
+      },
+      "id": "2de292d9-6749-4b97-9355-cbdfbca2a747",
+      "name": "06 Integrity & facts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": "",
+              "id": "c50dc8b1-0e4f-4abd-b215-3b2ee6f2ba46"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "638957d6-9e76-4c8f-a4f2-3d5a0ec0852f",
+      "name": "07 Integrity ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.openai_body) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "e9711ba1-4d9f-4c35-8b98-e417b8defe15",
+      "name": "08 Generate email (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1488,
+        -64
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"09 Validate output\" (attempt 1) / \"12 Validate output (retry)\" (attempt 2)\n// Never trust the model: every number, date and required element is checked against the deterministic facts.\nconst ATTEMPT = 1; // the build script sets this to 2 for the retry node\nconst ctx = $('06 Integrity & facts').first().json;\nconst facts = ctx.facts;\nconst resp = $input.first().json;\nconst violations = [];\nlet subject = '';\nlet body = '';\n\ntry {\n  const content = resp.choices[0].message.content;\n  const j = JSON.parse(content);\n  subject = typeof j.subject === 'string' ? j.subject.trim() : '';\n  body = typeof j.body === 'string' ? j.body.trim() : '';\n} catch (e) {\n  violations.push('The model output was not valid JSON with \"subject\" and \"body\".');\n}\nif (!subject) violations.push('Subject is empty.');\nif (!body) violations.push('Body is empty.');\n\nif (body) {\n  const mode = ctx.payout_mode;\n  const flags = facts.scenario_flags;\n  const allowedNums = ctx.allowed_numbers;\n  const allowedDates = ctx.allowed_dates;\n  const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';\n\n  // 1. number whitelist\n  const nums = body.match(/\\d[\\d,]*/g) || [];\n  nums.forEach((t) => {\n    const n = t.replace(/,+$/, '').replace(/,/g, '');\n    if (allowedNums.indexOf(n) < 0) violations.push('Unknown number \"' + t + '\" (not in FACTS).');\n  });\n\n  // 2. date whitelist\n  const dateRe = new RegExp('\\\\b\\\\d{1,2} (?:' + MONTHS + ') \\\\d{4}\\\\b', 'g');\n  (body.match(dateRe) || []).forEach((dt) => {\n    if (allowedDates.indexOf(dt) < 0) violations.push('Date \"' + dt + '\" is not allowed here.');\n  });\n\n  // 3. required content\n  if (body.slice(0, 160).indexOf(facts.author_first_name) < 0) violations.push('The greeting must use the author\\'s first name.');\n  facts.published_books.forEach((b) => { if (body.indexOf(b.title) < 0) violations.push('Missing published book \"' + b.title + '\".'); });\n  facts.production_books.forEach((b) => { if (body.indexOf(b.title) < 0) violations.push('Missing in-production book \"' + b.title + '\".'); });\n  ['earned', 'paid', 'pending'].forEach((k) => { if (body.indexOf(facts.totals[k]) < 0) violations.push('Missing total ' + k + ' (' + facts.totals[k] + ').'); });\n  if (!/Warm regards,\\s*\\n?\\s*The BookLeaf Team\\s*$/.test(body)) violations.push('The email must end with \"Warm regards,\" then \"The BookLeaf Team\".');\n\n  // 4. mode-specific rules\n  if (mode === 'ALL_PAID') {\n    if (/outstanding|next payout|due by|will be paid|upcoming payout/i.test(body)) violations.push('All-paid email must not mention outstanding amounts or upcoming payouts.');\n  }\n  if (mode === 'OVERDUE') {\n    if (/\\b(soon|shortly|within the next|by the end of)\\b/i.test(body)) violations.push('Overdue email must not use timing promises (soon/shortly/within the next/by the end of).');\n    if (/will be (paid|credited|processed|released|transferred|disbursed)/i.test(body)) violations.push('Overdue email must not promise a future payment.');\n  }\n  if (mode === 'IN_CYCLE') {\n    if (facts.payout_policy.standard_due_by && body.indexOf(facts.payout_policy.standard_due_by) < 0) violations.push('Must state the standard due date ' + facts.payout_policy.standard_due_by + '.');\n  }\n  if (mode === 'BELOW_THRESHOLD' && /\\b(overdue|late|delay\\w*)\\b/i.test(body)) violations.push('Below-minimum email must not call the amount overdue, late or delayed.');\n  if (/\\*\\*|^#{1,6}\\s/m.test(body)) violations.push('Plain text only: markdown symbols are not allowed.');\n  if (facts.production_books.length === 0 && /production/i.test(body)) violations.push('Mentions production although no book is in production.');\n  if (mode === 'OVERDUE' && !facts.payout_policy.date_statement_allowed && ctx.allowed_dates.length && /\\bdue by\\b/i.test(body)) violations.push('Overdue email must not state a due-by date.');\n  if (flags.indexOf('BELOW_THRESHOLD') >= 0) {\n    if (body.indexOf(facts.payout_policy.minimum_payout) < 0 || !/next quarter/i.test(body)) violations.push('Must explain the minimum payout and rollover to the next quarter.');\n  }\n\n  // 5. forbidden patterns\n  if (/\\[|\\]|\\{\\{|\\}\\}|TODO|guarantee|as an AI|\\bAI\\b|FACTS/i.test(body + ' ' + subject)) violations.push('Contains a placeholder, \"guarantee\", or a reference to AI/FACTS.');\n  if (!ctx.escalation_commitment_enabled) {\n    const stripped = body.replace(/45[- ]days?/gi, '');\n    if (/\\b(within|in)\\s+(a|an|one|two|three|\\d+)\\s+(hours?|days?|business days?)\\b/i.test(stripped)) violations.push('Contains a response-time commitment, which is not enabled.');\n  }\n\n  // 6. length\n  const words = body.split(/\\s+/).filter(Boolean).length;\n  if (words < 80 || words > 450) violations.push('Length ' + words + ' words is outside 80-450.');\n}\n\nconst ok = violations.length === 0;\nconst out = { ok, violations, attempt: ATTEMPT, email_subject: subject, email_body: body, fail_stage: ok ? '' : 'output_validation', fail_message: ok ? '' : 'AI output failed validation after ' + ATTEMPT + ' attempt(s): ' + violations.join(' | ') };\n\nif (!ok && ATTEMPT === 1) {\n  const retryBody = JSON.parse(JSON.stringify(ctx.openai_body));\n  retryBody.messages.push({ role: 'assistant', content: JSON.stringify({ subject, body }) });\n  retryBody.messages.push({ role: 'user', content: 'Your draft broke these rules:\\n- ' + violations.join('\\n- ') + '\\nWrite the email again, fixing every point. Use only numbers and dates from FACTS.' });\n  out.openai_body_retry = retryBody;\n}\nreturn [{ json: out }];\n"
+      },
+      "id": "55c044e5-a248-4958-a59c-269e879417ed",
+      "name": "09 Validate output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": "",
+              "id": "49381a7f-f3ad-41a5-95e7-fe59d7500520"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "713320c6-55a9-4846-9426-51ec0cbfd6a2",
+      "name": "10 Output ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1872,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"90 Build success response\"\n// Output is returned to Bubble as the webhook's HTTP response (Bubble's Free plan cannot receive a separate callback).\nconst v = $input.first().json; // result of the output validator that passed\nconst ctx = $('06 Integrity & facts').first().json;\nconst p = ctx.payload;\nreturn [{\n  json: {\n    http_code: 200,\n    response: {\n      request_id: p.request_id,\n      status: 'Success',\n      completed_at: new Date().toISOString(),\n      email_subject: v.email_subject,\n      email_body: v.email_body,\n      recipient_email: p.author.email,\n      ai_model: ctx.model,\n      failure_stage: '',\n      error_message: '',\n      n8n_execution_id: String($execution.id),\n      pending_snapshot: p.totals.pending,\n      payout_mode: ctx.payout_mode,\n      attempts: v.attempt,\n      demo_mode: p.demo_mode,\n      reference_date_used: p.reference_date,\n    },\n  },\n}];\n"
+      },
+      "id": "9698cb7f-8f3d-4d48-be72-c11b312012c0",
+      "name": "90 Build success response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2944,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.openai_body_retry) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "14549813-96c0-4b0b-964b-779605557f88",
+      "name": "11 Regenerate email (OpenAI, once)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2032,
+        -96
+      ],
+      "retryOnFail": false,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"09 Validate output\" (attempt 1) / \"12 Validate output (retry)\" (attempt 2)\n// Never trust the model: every number, date and required element is checked against the deterministic facts.\nconst ATTEMPT = 2; // the build script sets this to 2 for the retry node\nconst ctx = $('06 Integrity & facts').first().json;\nconst facts = ctx.facts;\nconst resp = $input.first().json;\nconst violations = [];\nlet subject = '';\nlet body = '';\n\ntry {\n  const content = resp.choices[0].message.content;\n  const j = JSON.parse(content);\n  subject = typeof j.subject === 'string' ? j.subject.trim() : '';\n  body = typeof j.body === 'string' ? j.body.trim() : '';\n} catch (e) {\n  violations.push('The model output was not valid JSON with \"subject\" and \"body\".');\n}\nif (!subject) violations.push('Subject is empty.');\nif (!body) violations.push('Body is empty.');\n\nif (body) {\n  const mode = ctx.payout_mode;\n  const flags = facts.scenario_flags;\n  const allowedNums = ctx.allowed_numbers;\n  const allowedDates = ctx.allowed_dates;\n  const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';\n\n  // 1. number whitelist\n  const nums = body.match(/\\d[\\d,]*/g) || [];\n  nums.forEach((t) => {\n    const n = t.replace(/,+$/, '').replace(/,/g, '');\n    if (allowedNums.indexOf(n) < 0) violations.push('Unknown number \"' + t + '\" (not in FACTS).');\n  });\n\n  // 2. date whitelist\n  const dateRe = new RegExp('\\\\b\\\\d{1,2} (?:' + MONTHS + ') \\\\d{4}\\\\b', 'g');\n  (body.match(dateRe) || []).forEach((dt) => {\n    if (allowedDates.indexOf(dt) < 0) violations.push('Date \"' + dt + '\" is not allowed here.');\n  });\n\n  // 3. required content\n  if (body.slice(0, 160).indexOf(facts.author_first_name) < 0) violations.push('The greeting must use the author\\'s first name.');\n  facts.published_books.forEach((b) => { if (body.indexOf(b.title) < 0) violations.push('Missing published book \"' + b.title + '\".'); });\n  facts.production_books.forEach((b) => { if (body.indexOf(b.title) < 0) violations.push('Missing in-production book \"' + b.title + '\".'); });\n  ['earned', 'paid', 'pending'].forEach((k) => { if (body.indexOf(facts.totals[k]) < 0) violations.push('Missing total ' + k + ' (' + facts.totals[k] + ').'); });\n  if (!/Warm regards,\\s*\\n?\\s*The BookLeaf Team\\s*$/.test(body)) violations.push('The email must end with \"Warm regards,\" then \"The BookLeaf Team\".');\n\n  // 4. mode-specific rules\n  if (mode === 'ALL_PAID') {\n    if (/outstanding|next payout|due by|will be paid|upcoming payout/i.test(body)) violations.push('All-paid email must not mention outstanding amounts or upcoming payouts.');\n  }\n  if (mode === 'OVERDUE') {\n    if (/\\b(soon|shortly|within the next|by the end of)\\b/i.test(body)) violations.push('Overdue email must not use timing promises (soon/shortly/within the next/by the end of).');\n    if (/will be (paid|credited|processed|released|transferred|disbursed)/i.test(body)) violations.push('Overdue email must not promise a future payment.');\n  }\n  if (mode === 'IN_CYCLE') {\n    if (facts.payout_policy.standard_due_by && body.indexOf(facts.payout_policy.standard_due_by) < 0) violations.push('Must state the standard due date ' + facts.payout_policy.standard_due_by + '.');\n  }\n  if (mode === 'BELOW_THRESHOLD' && /\\b(overdue|late|delay\\w*)\\b/i.test(body)) violations.push('Below-minimum email must not call the amount overdue, late or delayed.');\n  if (/\\*\\*|^#{1,6}\\s/m.test(body)) violations.push('Plain text only: markdown symbols are not allowed.');\n  if (facts.production_books.length === 0 && /production/i.test(body)) violations.push('Mentions production although no book is in production.');\n  if (mode === 'OVERDUE' && !facts.payout_policy.date_statement_allowed && ctx.allowed_dates.length && /\\bdue by\\b/i.test(body)) violations.push('Overdue email must not state a due-by date.');\n  if (flags.indexOf('BELOW_THRESHOLD') >= 0) {\n    if (body.indexOf(facts.payout_policy.minimum_payout) < 0 || !/next quarter/i.test(body)) violations.push('Must explain the minimum payout and rollover to the next quarter.');\n  }\n\n  // 5. forbidden patterns\n  if (/\\[|\\]|\\{\\{|\\}\\}|TODO|guarantee|as an AI|\\bAI\\b|FACTS/i.test(body + ' ' + subject)) violations.push('Contains a placeholder, \"guarantee\", or a reference to AI/FACTS.');\n  if (!ctx.escalation_commitment_enabled) {\n    const stripped = body.replace(/45[- ]days?/gi, '');\n    if (/\\b(within|in)\\s+(a|an|one|two|three|\\d+)\\s+(hours?|days?|business days?)\\b/i.test(stripped)) violations.push('Contains a response-time commitment, which is not enabled.');\n  }\n\n  // 6. length\n  const words = body.split(/\\s+/).filter(Boolean).length;\n  if (words < 80 || words > 450) violations.push('Length ' + words + ' words is outside 80-450.');\n}\n\nconst ok = violations.length === 0;\nconst out = { ok, violations, attempt: ATTEMPT, email_subject: subject, email_body: body, fail_stage: ok ? '' : 'output_validation', fail_message: ok ? '' : 'AI output failed validation after ' + ATTEMPT + ' attempt(s): ' + violations.join(' | ') };\n\nif (!ok && ATTEMPT === 1) {\n  const retryBody = JSON.parse(JSON.stringify(ctx.openai_body));\n  retryBody.messages.push({ role: 'assistant', content: JSON.stringify({ subject, body }) });\n  retryBody.messages.push({ role: 'user', content: 'Your draft broke these rules:\\n- ' + violations.join('\\n- ') + '\\nWrite the email again, fixing every point. Use only numbers and dates from FACTS.' });\n  out.openai_body_retry = retryBody;\n}\nreturn [{ json: out }];\n"
+      },
+      "id": "098169d2-471e-42ba-bbba-e0eafe723eac",
+      "name": "12 Validate output (retry)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bf0b11fe-84b0-4209-b9d5-24f37963be60",
+      "name": "13 Retry output ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2480,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"98 Build failed response\"\n// Every failure branch (validation, duplicate, data, ai, output_validation) ends here, so Bubble always gets a\n// structured Failed/Skipped result with a stage and a human-readable reason - never silence.\nconst j = $input.first().json;\nlet p = {};\ntry { p = $('02 Validate Input').first().json.payload || {}; } catch (e) { p = {}; }\n\nlet stage = j.fail_stage;\nlet message = j.fail_message;\nif (j.error) { // an error output of an HTTP node (the OpenAI call)\n  const e = j.error;\n  stage = 'ai';\n  message = 'AI request failed: ' + (e.message || 'unknown error') + (e.httpCode ? ' (HTTP ' + e.httpCode + ')' : '') + (e.description ? ' - ' + String(e.description).slice(0, 200) : '');\n}\nstage = stage || 'unknown';\nmessage = message || 'Unknown failure';\n\nreturn [{\n  json: {\n    http_code: 200,\n    response: {\n      request_id: p.request_id || '',\n      status: stage === 'duplicate' ? 'Skipped' : 'Failed',\n      completed_at: new Date().toISOString(),\n      email_subject: '',\n      email_body: '',\n      recipient_email: p.author ? p.author.email : '',\n      ai_model: '',\n      failure_stage: stage,\n      error_message: String(message).slice(0, 900),\n      n8n_execution_id: String($execution.id),\n      pending_snapshot: p.totals ? p.totals.pending : 0,\n      payout_mode: '',\n      attempts: 0,\n      demo_mode: !!p.demo_mode,\n      reference_date_used: p.reference_date || '',\n    },\n  },\n}];\n"
+      },
+      "id": "b0664a2d-3153-4c03-a9a9-207b1924fb0f",
+      "name": "98 Build failed response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2944,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code }}"
+        }
+      },
+      "id": "bb809774-f963-45a4-b657-307cd3fab85b",
+      "name": "99 Respond to Bubble",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3168,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n Code node (Run Once for All Items) - \"99 Release author lock\" (runs after the response has been sent)\n// Releases only the lock this request owns, so a duplicate request can never release the original's lock.\nlet p = null;\ntry { p = $('02 Validate Input').first().json.payload; } catch (e) { p = null; }\nif (p && p.author && p.author.author_id) {\n  const sd = $getWorkflowStaticData('global');\n  if (sd.locks && sd.locks[p.author.author_id] && sd.locks[p.author.author_id].request_id === p.request_id) {\n    delete sd.locks[p.author.author_id];\n  }\n}\nreturn [{ json: { released: true } }];\n"
+      },
+      "id": "1bca8e42-3d11-43c2-b810-ec495fc2fdf9",
+      "name": "99b Release author lock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## A. Intake & security\nWebhook is protected by a Header Auth secret (X-BookLeaf-Secret); a wrong or missing secret is rejected by n8n with 403 before anything runs. The payload from Bubble is validated, never trusted.",
+        "height": 256,
+        "width": 640,
+        "color": 4
+      },
+      "id": "4538e57a-c5be-48ba-9e77-75548d914213",
+      "name": "Sticky Note 3ee87405",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## B. Idempotency (best-effort)\nPer-author lock in workflow static data. NOT atomic and NOT guaranteed; Bubble claim-then-arbitrate is the enforced guard. Released after the response, only by the owning request.",
+        "height": 304,
+        "width": 416,
+        "color": 6
+      },
+      "id": "0d6ea0fe-4383-4210-8995-6ced53f11f48",
+      "name": "Sticky Note 36b48070",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        368,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## C. Deterministic facts\nAll money, dates, payout mode and the next-payout date are computed here in code and re-checked against Bubble totals. The AI never calculates.",
+        "height": 272,
+        "width": 448,
+        "color": 5
+      },
+      "id": "30f2bf26-32be-499d-b4fc-ba255d8481ad",
+      "name": "Sticky Note 2a0887cd",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        848,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## D. AI + validation\nOne call (retry on transient errors). Output is validated: number/date whitelist, required content, mode rules (no payout-date promise when overdue). One regeneration with the violations, otherwise Failed(output_validation). OpenAI errors go to the error output -> Failed(ai).",
+        "height": 416,
+        "width": 1216,
+        "color": 7
+      },
+      "id": "5c2ef545-3150-4149-8879-0b5403e61786",
+      "name": "Sticky Note db948a75",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        -304
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## E. Response\nBubble Free plan cannot receive an inbound callback, so the result (Success/Failed, timestamp, email, failure stage) is returned as this webhook's HTTP response. Every branch ends here.",
+        "height": 560,
+        "width": 720,
+        "color": "#3D3800"
+      },
+      "id": "f39deca6-c10f-4426-b9df-60b2a38618a3",
+      "name": "Sticky Note f9d48f76",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2880,
+        96
+      ]
+    }
+  ],
+  "connections": {
+    "01 Webhook": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Input": {
+      "main": [
+        [
+          {
+            "node": "03 Input valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Input valid?": {
+      "main": [
+        [
+          {
+            "node": "04 Acquire author lock (best-effort)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Acquire author lock (best-effort)": {
+      "main": [
+        [
+          {
+            "node": "05 Not a duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Not a duplicate?": {
+      "main": [
+        [
+          {
+            "node": "06 Integrity & facts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Integrity & facts": {
+      "main": [
+        [
+          {
+            "node": "07 Integrity ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Integrity ok?": {
+      "main": [
+        [
+          {
+            "node": "08 Generate email (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Generate email (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "09 Validate output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Validate output": {
+      "main": [
+        [
+          {
+            "node": "10 Output ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Output ok?": {
+      "main": [
+        [
+          {
+            "node": "90 Build success response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "11 Regenerate email (OpenAI, once)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "90 Build success response": {
+      "main": [
+        [
+          {
+            "node": "99 Respond to Bubble",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Regenerate email (OpenAI, once)": {
+      "main": [
+        [
+          {
+            "node": "12 Validate output (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Validate output (retry)": {
+      "main": [
+        [
+          {
+            "node": "13 Retry output ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13 Retry output ok?": {
+      "main": [
+        [
+          {
+            "node": "90 Build success response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "98 Build failed response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "98 Build failed response": {
+      "main": [
+        [
+          {
+            "node": "99 Respond to Bubble",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "99 Respond to Bubble": {
+      "main": [
+        [
+          {
+            "node": "99b Release author lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "note": "Exported from n8n Cloud workflow xh2oZOwcDjATI8S1 on 2026-11-07; credential ids replaced with REPLACE_ME"
+  }
+}
