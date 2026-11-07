@@ -14,12 +14,12 @@ Assignment 2 submission for BookLeaf Publishing. Authors log in and see their ow
 
 | | |
 |---|---|
-| **Bubble application** | [BUBBLE_APP_URL: to be provided](#) |
+| **Bubble application** | [https://mohitchaudhary2207.bubbleapps.io/version-test/](https://mohitchaudhary2207.bubbleapps.io/version-test/) |
 | **Admin demo account** | `admin@bookleaf.com` / `author@123` |
 | **Author demo account** | `priya.sharma@email.com` / `author@123` |
 | **n8n workflow export** | [`n8n/export/bookleaf-royalty-summary.workflow.json`](n8n/export/bookleaf-royalty-summary.workflow.json) (credentials replaced with `REPLACE_ME`) |
 | **n8n Code-node source** | [`n8n/code/`](n8n/code/) |
-| **Screen recording** | [GOOGLE_DRIVE_RECORDING_LINK: to be provided](#) |
+| **Screen recording** | [Watch on Google Drive](https://drive.google.com/file/d/1AsqqUmUkYc7IvFDkVhXYP4w617R_N7Z2/view?usp=sharing) |
 
 > **Reading guide.** Part A describes the system as it is built today. Part B is the build journey: what was new to me, what went wrong, and what I changed.
 
@@ -70,7 +70,7 @@ Assignment 2 submission for BookLeaf Publishing. Authors log in and see their ow
 
 The admin clicks a button, Bubble hands the author's data to an n8n workflow, GPT-4o-mini writes the email, the workflow checks the result, and Bubble stores it. The outcome is a consistent, accurate summary for every author without anyone retyping figures.
 
-> **Delivery.** The email is generated and stored in the Notification Log. No SMTP or email service is connected, so nothing is delivered to the author. The UI says "generated", not "sent". The brief lists SMTP delivery as a bonus, and I did not build it.
+> **Delivery.** The email is generated and stored in the Notification Log. No SMTP or email service is connected, so nothing is delivered to the author. The UI says "generated", not "sent". 
 
 ## 2. Application at a glance
 
@@ -464,7 +464,7 @@ flowchart TD
 
 ## 12. Known limitations and trade-offs
 
-- **Generated, not delivered.** Emails are stored in the Notification Log. SMTP delivery was a bonus item and is not configured.
+- **Generated, not delivered.** Emails are stored in the Notification Log.
 - **Not a payout history.** The log records summary requests. The dataset has no individual payout transactions, so none are shown.
 - **Free plan shaped the design.** No inbound API led to the synchronous response. No scheduled backend jobs that ran led to page-side timeouts. No branches or savepoints meant I built directly on the test version in small steps.
 - **Timeouts need the page open.** The job that fails stale Queued requests runs only while an admin page is open.
@@ -472,7 +472,6 @@ flowchart TD
 - **Stored statuses are a snapshot.** Royalty and payout statuses are stored fields, and nothing refreshes them on a schedule. They are correct for 5 November 2026. I removed the admin "Recalculate" button as outside the brief, so status refresh today would need that action rebuilt.
 - **n8n lock is best effort.** Bubble's guard is the enforced one.
 - **Name search relies on** `search_key`**.** A new author must have it filled in to be found by name.
-- **Author accounts.** The temporary admin account-creation page (`temp_author_signup`) and the admin invite card were both removed on 6–7 Nov 2026. The test author and admin logins already exist; new author logins would need a new mechanism. Bubble's built-in `reset_pw` page cannot be deleted, but nothing in the app links to it.
 - **Bubble search limits.** Searches can only filter on stored fields, which is why the roll-ups are stored, and privacy conditions can look only one hop from the thing, which is why `author_profile` exists.
 
 These are trade-offs I made against the platform and the assignment scope. None of them is hidden in the UI: the page states "generated" and the log shows every failure.
