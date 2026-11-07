@@ -469,7 +469,6 @@ flowchart TD
 - **Free plan shaped the design.** No inbound API led to the synchronous response. No scheduled backend jobs that ran led to page-side timeouts. No branches or savepoints meant I built directly on the test version in small steps.
 - **Timeouts need the page open.** The job that fails stale Queued requests runs only while an admin page is open.
 - **Bulk send needs the page open.** The page starts one author every six seconds and shows the progress notification. Closing the page stops the rest of the queue.
-- **Stored statuses are a snapshot.** Royalty and payout statuses are stored fields, and nothing refreshes them on a schedule. They are correct for 5 November 2026. I removed the admin "Recalculate" button as outside the brief, so status refresh today would need that action rebuilt.
 - **n8n lock is best effort.** Bubble's guard is the enforced one.
 - **Name search relies on** `search_key`**.** A new author must have it filled in to be found by name.
 - **Bubble search limits.** Searches can only filter on stored fields, which is why the roll-ups are stored, and privacy conditions can look only one hop from the thing, which is why `author_profile` exists.
